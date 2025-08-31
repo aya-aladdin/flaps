@@ -6,18 +6,22 @@
     <title>Flappy Bird: The Demon Within</title>
     <style>
         body {
-            font-family: 'Arial', sans-serif;
+            font-family: 'Press Start 2P', cursive;
             background-color: #181818;
             color: white;
             text-align: center;
             margin: 0;
             padding: 0;
             overflow: hidden;
+            background: #222 url('https://art.pixilart.com/2646c07a3c30704.gif') repeat;
+            background-size: cover;
         }
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
         h1 {
             font-size: 2.5em;
             color: #ff6347;
             text-shadow: 2px 2px 10px rgba(255, 0, 0, 0.8);
+            margin-top: 50px;
         }
         h2 {
             color: #ffcc00;
@@ -28,186 +32,285 @@
             border: 5px solid #ff6347;
             background: #222;
             display: block;
-            margin: 0 auto;
+            margin: 20px auto;
             box-shadow: 0 0 15px rgba(255, 0, 0, 0.5);
+            image-rendering: pixelated;
         }
-        .play-button {
-            padding: 20px 50px;
+        .play-button, .restart-button {
+            padding: 15px 30px;
             background-color: #ff6347;
             color: white;
-            font-size: 30px;
+            font-size: 20px;
+            font-family: 'Press Start 2P', cursive;
             border: none;
             cursor: pointer;
-            border-radius: 10px;
+            border-radius: 5px;
             transition: 0.3s;
+            box-shadow: 0 5px 15px rgba(255, 0, 0, 0.4);
         }
-        .play-button:hover {
+        .play-button:hover, .restart-button:hover {
             background-color: #ff4747;
-            transform: scale(1.1);
+            transform: scale(1.05);
         }
         .score-board {
             margin-top: 20px;
-            font-size: 1.2em;
+            font-size: 1.5em;
+            color: #ffcc00;
+            text-shadow: 1px 1px 5px rgba(255, 255, 255, 0.7);
         }
         .game-container {
             display: none;
         }
-        .game-over {
+        .game-over-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+        .game-over-text {
             color: #ffcc00;
             font-size: 2em;
             text-shadow: 1px 1px 10px rgba(255, 0, 0, 0.6);
+            margin-bottom: 20px;
         }
         .twist {
             color: #ff6347;
-            font-size: 1.5em;
+            font-size: 1.2em;
             font-style: italic;
+            margin-top: 10px;
         }
     </style>
 </head>
 <body>
 
     <h1>Flappy Bird: The Demon Within</h1>
-    <button class="play-button" onclick="startGame()">Face Your Fears</button>
+    <button class="play-button" onclick="init()">Face Your Fears</button>
 
     <div class="game-container">
-        <h2>Score: <span id="score">0</span></h2>
-        <canvas id="gameCanvas" width="400" height="600"></canvas>
         <div class="score-board">
-            <p class="twist">Your score is a reflection of your inner strength...</p>
+            Score: <span id="score">0</span>
         </div>
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
     </div>
 
-    <div class="game-over"></div>
+    <div class="game-over-screen">
+        <div class="game-over-text">Game Over!</div>
+        <div class="score-board">Your Final Score: <span id="finalScore">0</span></div>
+        <button class="restart-button" onclick="init()">Try Again?</button>
+    </div>
 
     <script>
-        let canvas, ctx;
-        let birdX, birdY, birdVelocity;
-        let pipes = [];
-        let score = 0;
-        let gameOverFlag = false;
-        let gameInterval;
-        let backgroundMusic;
-        let scareSounds = [];
-        let randomScare;
-        const pipeGap = 100;  
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const playButton = document.querySelector('.play-button');
+        const gameContainer = document.querySelector('.game-container');
+        const gameOverScreen = document.querySelector('.game-over-screen');
 
+        const BIRD_SIZE = 40;
+        const GRAVITY = 0.5;
+        const JUMP_VELOCITY = -9;
+        const PIPE_WIDTH = 60;
+        const PIPE_SPEED = 2;
+        const PIPE_GAP = 150; 
+        
+        let bird, pipes, score, isGameOver, gameLoopId;
+
+        // Assets
         const birdImage = new Image();
         birdImage.src = 'https://art.pixilart.com/2d9aad8e28a46a5.png';
         const pipeImage = new Image();
-        pipeImage.src = 'https://art.pixilart.com/491c8ee8a268b4a.png';  
+        pipeImage.src = 'https://art.pixilart.com/491c8ee8a268b4a.png';
+        const flapSound = new Audio('https://www.soundjay.com/button/button-10.wav');
+        const scoreSound = new Audio('https://www.soundjay.com/button/button-20.wav');
+        const gameOverSound = new Audio('https://www.soundjay.com/button/button-30.wav');
+        
+        // Wait for all images to load before starting the game
+        let assetsLoaded = 0;
+        const totalAssets = 2; // birdImage, pipeImage
+        function assetLoaded() {
+            assetsLoaded++;
+            if (assetsLoaded === totalAssets) {
+                playButton.disabled = false;
+                playButton.textContent = 'Face Your Fears';
+            }
+        }
+        birdImage.onload = assetLoaded;
+        pipeImage.onload = assetLoaded;
 
+        // Game Objects
+        function Bird() {
+            this.x = 50;
+            this.y = canvas.height / 2;
+            this.velocity = 0;
+            this.width = BIRD_SIZE;
+            this.height = BIRD_SIZE;
 
-        function startGame() {
-            document.querySelector('.game-container').style.display = 'block';
-            document.querySelector('.play-button').style.display = 'none';
-            document.querySelector('.game-over').style.display = 'none';
+            this.draw = function() {
+                ctx.drawImage(birdImage, this.x - this.width / 2, this.y - this.height / 2, this.width, this.height);
+            };
 
-            canvas = document.getElementById('gameCanvas');
-            ctx = canvas.getContext('2d');
+            this.update = function() {
+                this.velocity += GRAVITY;
+                this.y += this.velocity;
 
-            birdX = 50;
-            birdY = canvas.height / 2;
-            birdVelocity = 0;
-            score = 0;
-            gameOverFlag = false;
+                if (this.y + this.height / 2 > canvas.height || this.y - this.height / 2 < 0) {
+                    endGame();
+                }
+            };
+
+            this.jump = function() {
+                this.velocity = JUMP_VELOCITY;
+                flapSound.play();
+            };
+        }
+
+        function Pipe(x, topHeight) {
+            this.x = x;
+            this.width = PIPE_WIDTH;
+            this.topHeight = topHeight;
+            this.bottomY = topHeight + PIPE_GAP;
+            this.bottomHeight = canvas.height - this.bottomY;
+            this.passed = false;
+
+            this.draw = function() {
+                // Top pipe
+                ctx.drawImage(pipeImage, this.x, 0, this.width, this.topHeight);
+                // Bottom pipe
+                ctx.drawImage(pipeImage, this.x, this.bottomY, this.width, this.bottomHeight);
+            };
+
+            this.update = function() {
+                this.x -= PIPE_SPEED;
+            };
+        }
+
+        function init() {
+            playButton.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            gameContainer.style.display = 'block';
+
+            bird = new Bird();
             pipes = [];
+            score = 0;
+            isGameOver = false;
+            scoreDisplay.textContent = score;
 
-            document.getElementById('score').textContent = score;
+            // Start game loop
+            gameLoopId = requestAnimationFrame(gameLoop);
 
-            document.addEventListener('keydown', flapBird);
-            document.addEventListener('click', flapBird);
-
-            backgroundMusic = new Audio('https://www.soundjay.com/button/beep-07.wav');
-            backgroundMusic.loop = true;
-            backgroundMusic.play();
-
-            scareSounds = [
-                new Audio('https://www.soundjay.com/button/beep-08b.wav'),
-                new Audio('https://www.soundjay.com/button/beep-09.wav')
-            ];
-
-            gameInterval = setInterval(gameLoop, 1000 / 60);  
+            document.addEventListener('keydown', handleInput);
+            document.addEventListener('mousedown', handleInput);
         }
 
-        function flapBird() {
-            if (gameOverFlag) return;
-            birdVelocity = -8;  
+        function handleInput(event) {
+            if (isGameOver) return;
+            if (event.code === 'Space' || event.button === 0) {
+                bird.jump();
+            }
         }
+
+        function generatePipe() {
+            const topHeight = Math.random() * (canvas.height - PIPE_GAP - 100) + 50;
+            pipes.push(new Pipe(canvas.width, topHeight));
+        }
+        
+        let pipeTimer = 0;
+        const pipeSpawnInterval = 120; // Spawn a new pipe every 120 frames (~2 seconds at 60fps)
 
         function gameLoop() {
-            if (gameOverFlag) return;
-
-            birdVelocity += 0.5;  
-            birdY += birdVelocity;
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            ctx.drawImage(birdImage, birdX - 15, birdY - 15, 30, 30);
-
-            if (Math.random() < 0.02) {
-                generateObstacle();
+            if (isGameOver) {
+                cancelAnimationFrame(gameLoopId);
+                return;
             }
 
+            // Update
+            bird.update();
+            pipes.forEach(pipe => pipe.update());
 
-            pipes.forEach((pipe, index) => {
-                pipe.x -= 2;  
+            // Remove off-screen pipes and update score
+            pipes = pipes.filter(pipe => {
                 if (pipe.x + pipe.width < 0) {
-                    pipes.splice(index, 1); 
+                    return false;
+                }
+                if (!pipe.passed && pipe.x < bird.x) {
+                    pipe.passed = true;
                     score++;
-                    document.getElementById('score').textContent = score;
-                    randomScare = Math.random();
-                    if (randomScare < 0.1) {
-                        scareSounds[Math.floor(Math.random() * scareSounds.length)].play();  // Play scary sound
-                    }
+                    scoreDisplay.textContent = score;
+                    scoreSound.play();
                 }
-
-                ctx.drawImage(pipeImage, pipe.x, 0, pipe.width, pipe.top);
-                ctx.drawImage(pipeImage, pipe.x, pipe.bottom, pipe.width, canvas.height - pipe.bottom);
-
-
-                if (birdX + 15 > pipe.x && birdX - 15 < pipe.x + pipe.width) {
-                    if (birdY - 15 < pipe.top || birdY + 15 > pipe.bottom) {
-                        endGame();
-                    }
-                }
+                return true;
             });
-
-            if (birdY + 15 >= canvas.height) {
-                endGame();  
+            
+            // Generate new pipe
+            pipeTimer++;
+            if (pipeTimer % pipeSpawnInterval === 0) {
+                generatePipe();
             }
 
-  
-            if (birdY - 15 < 0) {
-                endGame(); 
+            // Check for collision
+            checkCollisions();
+            
+            // Draw
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            bird.draw();
+            pipes.forEach(pipe => pipe.draw());
+
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+        
+        function checkCollisions() {
+            for (const pipe of pipes) {
+                // Simplified box collision
+                const birdBox = {
+                    x: bird.x - bird.width / 2,
+                    y: bird.y - bird.height / 2,
+                    width: bird.width,
+                    height: bird.height
+                };
+
+                const topPipeBox = {
+                    x: pipe.x,
+                    y: 0,
+                    width: pipe.width,
+                    height: pipe.topHeight
+                };
+
+                const bottomPipeBox = {
+                    x: pipe.x,
+                    y: pipe.bottomY,
+                    width: pipe.width,
+                    height: pipe.bottomHeight
+                };
+
+                if (isColliding(birdBox, topPipeBox) || isColliding(birdBox, bottomPipeBox)) {
+                    endGame();
+                    return;
+                }
             }
         }
 
-        function generateObstacle() {
-       
-            const topPipeHeight = Math.random() * (canvas.height - pipeGap);
-
-    
-            pipes.push({
-                x: canvas.width,
-                width: 60,
-                top: topPipeHeight, 
-                bottom: topPipeHeight + pipeGap 
-            });
+        function isColliding(boxA, boxB) {
+            return boxA.x < boxB.x + boxB.width &&
+                   boxA.x + boxA.width > boxB.x &&
+                   boxA.y < boxB.y + boxB.height &&
+                   boxA.y + boxA.height > boxB.y;
         }
 
         function endGame() {
-            clearInterval(gameInterval);  
-            gameOverFlag = true;
-            document.querySelector('.game-over').textContent = 'Game Over! You were consumed by your inner demons...';
-            document.querySelector('.game-over').style.display = 'block';
-            backgroundMusic.pause();  
-            scareSounds[0].play();  
+            isGameOver = true;
+            gameOverSound.play();
+            finalScoreDisplay.textContent = score;
+            gameOverScreen.style.display = 'flex';
         }
     </script>
-
 </body>
 </html>
